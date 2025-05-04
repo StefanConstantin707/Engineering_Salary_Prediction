@@ -6,10 +6,8 @@ from sklearn.preprocessing import LabelEncoder
 
 
 class DataHandler:
-    def __init__(self, fill_data, fill_data_weights, fill_data_nn):
+    def __init__(self, fill_data):
         self.data = pl.read_csv("./data/raw_data/train.csv")
-        self.fill_data_weights = fill_data_weights
-        self.fill_data_nn = fill_data_nn
 
         self.data = self.data.with_columns(
             pl.col("job_posted_date").str.strptime(pl.Date, format="%Y/%m"),
@@ -19,8 +17,6 @@ class DataHandler:
             pl.col("feature_1").cast(pl.Categorical),
             pl.col(pl.Boolean).cast(pl.Int32)
         )
-
-
 
         feature_cols = [f"feature_{i}" for i in range(1, 13)]
         job_desc_cols = [f"job_desc_{i:03d}" for i in range(1, 301)]
