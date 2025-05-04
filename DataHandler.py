@@ -6,17 +6,25 @@ from sklearn.preprocessing import LabelEncoder
 
 
 class DataHandler:
-    def __init__(self, fill_data):
-        self.data = pl.read_csv("./data/raw_data/train.csv")
+    def __init__(self, fill_data, train_data):
+        if train_data:
+            self.data = pl.read_csv("./data/raw_data/train.csv")
+        else:
+            self.data = pl.read_csv("./data/raw_data/test.csv")
+        self.indexes = self.data["obs"]
+
 
         self.data = self.data.with_columns(
             pl.col("job_posted_date").str.strptime(pl.Date, format="%Y/%m"),
             pl.col("job_title").cast(pl.Categorical),
-            pl.col("salary_category").cast(pl.Categorical),
             pl.col("job_state").cast(pl.Categorical),
             pl.col("feature_1").cast(pl.Categorical),
             pl.col(pl.Boolean).cast(pl.Int32)
         )
+        if train_data:
+            self.data = self.data.with_columns(
+                pl.col("salary_category").cast(pl.Categorical),
+            )
 
         feature_cols = [f"feature_{i}" for i in range(1, 13)]
         job_desc_cols = [f"job_desc_{i:03d}" for i in range(1, 301)]
@@ -47,10 +55,11 @@ class DataHandler:
             columns=["job_title", "feature_1"]
         )
 
-        # 4. Encode target
-        Y = self.data["salary_category"]
-        le = LabelEncoder().fit(Y)
-        self.Y = le.transform(Y)
+        if train_data:
+            # 4. Encode target
+            Y = self.data["salary_category"]
+            self.le = LabelEncoder().fit(Y)
+            self.Y = self.le.transform(Y)
 
         if fill_data:
             self.X = self.fill_missing_data(self.X)

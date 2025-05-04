@@ -12,15 +12,16 @@ from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from skopt import BayesSearchCV
-from skorch import NeuralNetRegressor
-from skopt.space import Real, Integer
+from skorch import NeuralNetRegressor, NeuralNetClassifier
+from skopt.space import Real, Integer, Categorical
 from torch import optim, nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from DataHandler import DataHandler
 from NNModel import NNModel
+from SubmissionGenerator import SubmissionGenerator
 
 
 class PolarsToPandasTransformer(TransformerMixin, BaseEstimator):
@@ -120,54 +121,66 @@ def nn_test():
 
     dataHandler = DataHandler(fill_data=True)
     X, Y = dataHandler.X, dataHandler.Y
-    net = NeuralNetRegressor(
-        module=NNModel,
-        module__input_size=X.shape[1],
-        module__hidden_size=64,
-        module__output_size=3,
-        module__num_layers=1,
-        module__dropout=0.5,
-        max_epochs=20,
-        lr=0.01,
-        optimizer=torch.optim.Adam,
-        verbose=0,
-    )
+
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("net", NeuralNetClassifier(
+            module=NNModel,
+            module__input_size=X.shape[1],
+            module__hidden_size=64,
+            module__output_size=3,
+            module__num_layers=2,  # match your manual setting
+            module__dropout=0.3,  # as in manual
+            max_epochs=200,  # give it enough epochs
+            lr=3e-4,
+            optimizer=torch.optim.Adam,
+            batch_size=32,
+            verbose=0,
+            criterion=torch.nn.CrossEntropyLoss,
+        )),
+    ])
 
     param_search = {
-        # "module__hidden_size": Integer(64, 512),
-        # "module__num_layers": Integer(1, 4),
-        "module__dropout": Real(0.1, 0.6),
-        "lr": Real(1e-4, 1e-2, prior='log-uniform'),
-        "max_epochs": Integer(5, 20),
+        "net__lr": Real(1e-5, 1e-3, prior='log-uniform'),
+        "net__max_epochs": Integer(5, 300),
+        "net__module__hidden_size": Categorical([32, 64, 128]),
+        "net__module__num_layers": Integer(1, 3),
+        "net__module__dropout": Real(0.1, 0.7),
+        "net__optimizer__weight_decay": Real(1e-4, 1e-1, prior='log-uniform'),
+        "net__batch_size": Categorical([16, 32, 64, 128]),
     }
 
     opt = BayesSearchCV(
-        net,
+        pipe,
         param_search,
-        n_iter=20,
-        cv=KFold(3),
-        scoring='accuracy',  # or any other metric
+        n_iter=10,
+        cv=5,
+        scoring='accuracy',
         n_jobs=-1,
-        verbose=1,
+        verbose=3,
     )
 
-    opt.fit(X.to_numpy().astype(np.float32), Y.astype(np.float32))
+    # make sure Y is int64 so skorch produces LongTensor targets
+    X_np = X.to_numpy().astype(np.float32)
+    Y_np = Y.astype(np.int64)
+
+    opt.fit(X_np, Y_np)
 
     # 1) Best parameters found
     print("Best parameters:")
     for param, val in opt.best_params_.items():
         print(f"  {param}: {val}")
 
-    # 2) Best (cross-validated) score
-    print(f"\nBest CV score (neg MSE): {opt.best_score_:.4f}")
-    print(f"Best CV RMSE: {(-opt.best_score_) ** 0.5:.4f}")
+    # 2) Best cross-validated accuracy
+    print(f"\nBest CV accuracy: {opt.best_score_:.4f}")
 
-    # 3) Number of fits performed
+    # 3) Number of parameter settings evaluated
     print(f"\nTotal parameter settings evaluated: {len(opt.cv_results_['params'])}")
 
-    # 4) Show the top 5 candidates by mean test score
-
-    results = pd.DataFrame(opt.cv_results_).sort_values("mean_test_score", ascending=False)
+    # 4) Show the top 5 candidates by mean test accuracy
+    results = pd.DataFrame(opt.cv_results_).sort_values(
+        "mean_test_score", ascending=False
+    )
     top5 = results.head(5)[[
         "mean_test_score", "std_test_score", "params"
     ]].reset_index(drop=True)
@@ -175,9 +188,46 @@ def nn_test():
     print("\nTop 5 parameter settings:")
     for i, row in top5.iterrows():
         print(f"\nRank {i + 1}:")
-        print(f"  mean_test_score (neg MSE): {row.mean_test_score:.4f}")
-        print(f"  std_test_score:          {row.std_test_score:.4f}")
-        print(f"  params: {row.params}")
+        print(f"  mean_test_accuracy: {row.mean_test_score:.4f}")
+        print(f"  std_test_accuracy:  {row.std_test_score:.4f}")
+        print(f"  params:            {row.params}")
+
+def generate_nn_submission():
+    # 1) Train your model & get pipeline + label encoder:
+    dh = DataHandler(fill_data=True, train_data=True)
+    X_train, Y_train = dh.X.to_pandas().values, dh.Y
+    le = LabelEncoder().fit(Y_train)
+
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", NeuralNetClassifier(
+            module=NNModel,
+            module__input_size=X_train.shape[1],
+            module__hidden_size=128,
+            module__output_size=3,
+            module__num_layers=2,
+            module__dropout=0.5,
+            max_epochs=20,
+            lr=6e-4,
+            optimizer=torch.optim.Adam,
+            optimizer__weight_decay=0.001,
+            batch_size=64,
+            train_split=None,
+            verbose=0,
+            criterion=torch.nn.CrossEntropyLoss,
+        ))
+    ])
+    pipe.fit(X_train.astype(np.float32), le.transform(Y_train))
+
+    label_encoder = dh.le
+    dh = DataHandler(fill_data=True, train_data=False)
+    X_test, index = dh.X.to_pandas().values, dh.indexes
+
+    sub = SubmissionGenerator(pipe, label_encoder=label_encoder)
+    sub.generate(X_test, index)
+
+
+
 
 def nn_t_t(
     test_size: float = 0.2,
@@ -268,6 +318,6 @@ def nn_t_t(
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    nn_t_t()
+    generate_nn_submission()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
