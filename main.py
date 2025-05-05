@@ -26,10 +26,13 @@ from SubmissionGenerator import SubmissionGenerator
 
 class PolarsToPandasTransformer(TransformerMixin, BaseEstimator):
     """Transformer that converts a Polars DataFrame to a pandas DataFrame (numpy array)."""
+
     def fit(self, X, y=None):
         return self
+
     def transform(self, X: pl.DataFrame):
         return X.to_pandas().values
+
 
 def test():
     dh = DataHandler(1, 1, True)
@@ -79,6 +82,7 @@ def test():
     print("Best params:", bayes_cv.best_params_)
     print("Total features:", X_pl.shape[1])
 
+
 def main():
     dataHandler = DataHandler(fill_data=True)
 
@@ -117,13 +121,12 @@ def main():
     print("Best params:", bayes_cv.best_params_)
     print("Number of features", X.shape[1])
 
-def nn_test():
 
-    dataHandler = DataHandler(fill_data=True)
-    X, Y = dataHandler.X, dataHandler.Y
+def nn_test():
+    dataHandler = DataHandler()
+    X, Y = dataHandler.get_train_data()
 
     pipe = Pipeline([
-        ("scaler", StandardScaler()),
         ("net", NeuralNetClassifier(
             module=NNModel,
             module__input_size=X.shape[1],
@@ -143,8 +146,8 @@ def nn_test():
     param_search = {
         "net__lr": Real(1e-5, 1e-3, prior='log-uniform'),
         "net__max_epochs": Integer(5, 300),
-        "net__module__hidden_size": Categorical([32, 64, 128]),
-        "net__module__num_layers": Integer(1, 3),
+        "net__module__hidden_size": Categorical([4, 8, 16, 32, 64, 128]),
+        "net__module__num_layers": Integer(1, 5),
         "net__module__dropout": Real(0.1, 0.7),
         "net__optimizer__weight_decay": Real(1e-4, 1e-1, prior='log-uniform'),
         "net__batch_size": Categorical([16, 32, 64, 128]),
@@ -162,7 +165,7 @@ def nn_test():
 
     # make sure Y is int64 so skorch produces LongTensor targets
     X_np = X.to_numpy().astype(np.float32)
-    Y_np = Y.astype(np.int64)
+    Y_np = Y.to_numpy().astype(np.int64)
 
     opt.fit(X_np, Y_np)
 
@@ -191,6 +194,7 @@ def nn_test():
         print(f"  mean_test_accuracy: {row.mean_test_score:.4f}")
         print(f"  std_test_accuracy:  {row.std_test_score:.4f}")
         print(f"  params:            {row.params}")
+
 
 def generate_nn_submission():
     # 1) Train your model & get pipeline + label encoder:
@@ -227,12 +231,10 @@ def generate_nn_submission():
     sub.generate(X_test, index)
 
 
-
-
 def nn_t_t(
-    test_size: float = 0.2,
-    random_state: int = 0,
-    batch_size: int = 32
+        test_size: float = 0.2,
+        random_state: int = 0,
+        batch_size: int = 32
 ) -> nn.Module:
     # 1. Load data
     dataHandler = DataHandler(fill_data=True)
@@ -262,7 +264,7 @@ def nn_t_t(
     )
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size)
+    val_loader = DataLoader(val_ds, batch_size=batch_size)
 
     # 5. Initialize model, loss, optimizer
     model = NNModel(
@@ -318,6 +320,6 @@ def nn_t_t(
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    generate_nn_submission()
+    nn_test()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
