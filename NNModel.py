@@ -9,6 +9,7 @@ class NNModel(nn.Module):
         output_size: int,
         num_layers: int = 2,
         dropout: float = 0.5,
+        ordered_classification : bool = False,
     ):
         super().__init__()
 
@@ -27,6 +28,9 @@ class NNModel(nn.Module):
 
         # 3) output layer
         layers.append(nn.Linear(hidden_size, output_size))
+
+        if ordered_classification:
+            layers.append(nn.Sigmoid())
 
         # pack into Sequential
         self.net = nn.Sequential(*layers)

@@ -7,9 +7,10 @@ from torch.backends.opt_einsum import strategy
 
 
 class DataHandler:
-    def __init__(self):
+    def __init__(self, ordinal_classification=False):
         self.data = pl.read_csv("./data/raw_data/train.csv")
         self.test_data = pl.read_csv("./data/raw_data/test.csv")
+        self.ordinal_classification = ordinal_classification
 
         self.data_columns = ["job_posted_date"]
         self.categorical_columns = ["job_title", "feature_1", "job_state"]
@@ -29,13 +30,33 @@ class DataHandler:
         )
 
         # Encode Y label column
+        if self.ordinal_classification:
+            # self.label_map = {"Low": 0.0, "Medium": 1.0, "High": 2.0}
+            # self.data = self.data.with_columns(
+            #     pl.col("salary_category").cast(pl.Utf8).replace(self.label_map).cast(pl.Float32).alias("salary_category")
+            # )
+            n_thresholds = 5
+
+            self.data = self.data.with_columns([
+                # y_0 = 1.0 for Medium or High, else 0.0
+                pl.col("salary_category")
+                .is_in(["Medium", "High"])
+                .cast(pl.Float32)
+                .alias("y_0"),
+
+                # y_1 = 1.0 for High, else 0.0
+                (pl.col("salary_category") == "High")
+                .cast(pl.Float32)
+                .alias("y_1"),
+            ]).drop("salary_category")
+        else:
         # Fit LabelEncoder on numpy array
-        values = self.data["salary_category"]
-        self.le = LabelEncoder().fit(values)
-        labels = self.le.transform(values)
-        self.data = self.data.with_columns(
-            pl.Series("salary_category", labels)
-        )
+            values = self.data["salary_category"]
+            self.le = LabelEncoder().fit(values)
+            labels = self.le.transform(values)
+            self.data = self.data.with_columns(
+                pl.Series("salary_category", labels)
+            )
 
         # Compute the earliest posted date across both datasets
         min_data = self.data.select(pl.col("job_posted_date").min()).item()
@@ -188,7 +209,6 @@ class DataHandler:
         # drop old and add scaled
         return data.drop(num_cols).with_columns(scaled_series)
 
-
     def get_train_data(self):
         month_encoded_columns = sorted([c for c in self.data.columns if c.startswith("month_")])
         feature_1_encoded_columns = sorted([c for c in self.data.columns if c.startswith("feature_1_")])
@@ -198,19 +218,28 @@ class DataHandler:
                                  month_encoded_columns + feature_1_encoded_columns + job_title_encoded_columns + self.job_desc_cols)
 
         X = self.data[total_feature_columns]
-        Y = self.data[self.responder_column]
+        if self.ordinal_classification:
+            Y = self.data.select(["y_0", "y_1"])
+        else:
+            Y = self.data[self.responder_column]
 
         return X, Y
 
     def get_test_data(self):
-        month_encoded_columns = [c for c in self.data.columns if c.startswith("month_")]
-        feature_1_encoded_columns = [c for c in self.data.columns if c.startswith("feature_1_")]
-        job_title_encoded_columns = [c for c in self.data.columns if c.startswith("job_title_")]
+        month_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("month_")])
+        feature_1_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("feature_1_")])
+        job_title_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("job_title_")])
 
-        total_feature_columns = (month_encoded_columns + feature_1_encoded_columns + job_title_encoded_columns + ["months_since_ref"] +
-                                 self.bool_columns + self.quantitative_columns + self.job_desc_cols)
+        total_feature_columns = (["months_since_ref"] + self.bool_columns + self.quantitative_columns +
+                                 month_encoded_columns + feature_1_encoded_columns + job_title_encoded_columns + self.job_desc_cols)
 
         X = self.test_data[total_feature_columns]
 
         return X
+
+def remap_salary_category(code):
+    label_map = {"Low": 0, "Medium": 0.5, "High": 1}
+    if code is None:
+        return label_map[None]
+    return label_map.get(code, "unknown")
 
