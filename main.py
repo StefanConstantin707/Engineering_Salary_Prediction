@@ -1,5 +1,3 @@
-from tkinter.ttk import Treeview
-
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -60,7 +58,7 @@ def test_LG():
     # 2) define search space, including PCA n_components and Logistic C
     n_features = X.shape[1]
     search_space = {
-        "pca__n_components": Integer(5, min(200, n_features)),   # tune how many PCs
+        "pca__n_components": Integer(5,  n_features),   # tune how many PCs
         "clf__C": Real(1e-4, 1e1, prior="log-uniform"),
     }
 
@@ -73,7 +71,7 @@ def test_LG():
         scoring="accuracy",
         random_state=0,
         n_jobs=-1,
-        verbose=2,
+        verbose=3,
     )
 
     # 4) fit & report
@@ -266,9 +264,9 @@ def test_xgboost_improved(X, Y):
     early stopping, and additional hyperparameters.
     """
     #=== Top 3 for XGBoost (Improved) ===
-    # 1. mean_accuracy=0.7539, params=OrderedDict({'clf__colsample_bytree': 0.5, 'clf__gamma': 0.2073497817611189, 'clf__learning_rate': 0.04454710528725294, 'clf__max_depth': 8, 'clf__min_child_weight': 3, 'clf__n_estimators': 186, 'clf__reg_alpha': 0.1558019331286106, 'clf__reg_lambda': 0.17373696059896945, 'clf__subsample': 0.6660284019795022, 'feature_selector__threshold': 'mean'})
-    # 2. mean_accuracy=0.7516, params=OrderedDict({'clf__colsample_bytree': 0.5295355555496496, 'clf__gamma': 0.9848537657723972, 'clf__learning_rate': 0.031300533546632696, 'clf__max_depth': 8, 'clf__min_child_weight': 1, 'clf__n_estimators': 185, 'clf__reg_alpha': 0.6626711846877006, 'clf__reg_lambda': 1.0, 'clf__subsample': 0.5437417614677991, 'feature_selector__threshold': 'mean'})
-    # 3. mean_accuracy=0.7508, params=OrderedDict({'clf__colsample_bytree': 0.5, 'clf__gamma': 1.0, 'clf__learning_rate': 0.012865904232082646, 'clf__max_depth': 8, 'clf__min_child_weight': 1, 'clf__n_estimators': 500, 'clf__reg_alpha': 1.0, 'clf__reg_lambda': 1.0, 'clf__subsample': 0.8, 'feature_selector__threshold': 'median'})
+    # 1. mean_accuracy=0.7609, params=OrderedDict({'clf__colsample_bytree': 0.3554574842003609, 'clf__gamma': 0.058593119841979784, 'clf__learning_rate': 0.017574122529645332, 'clf__max_depth': 10, 'clf__min_child_weight': 1, 'clf__n_estimators': 453, 'clf__reg_alpha': 0.24536523577509664, 'clf__reg_lambda': 0.0, 'clf__subsample': 0.9, 'feature_selector__threshold': 'mean'})
+    # 2. mean_accuracy=0.7602, params=OrderedDict({'clf__colsample_bytree': 0.6348445849223282, 'clf__gamma': 0.39624302703610925, 'clf__learning_rate': 0.0024371033921490467, 'clf__max_depth': 11, 'clf__min_child_weight': 1, 'clf__n_estimators': 550, 'clf__reg_alpha': 0.419533123678035, 'clf__reg_lambda': 0.0, 'clf__subsample': 0.7304737284645081, 'feature_selector__threshold': '0.75*mean'})
+    # 3. mean_accuracy=0.7594, params=OrderedDict({'clf__colsample_bytree': 0.4657827145775741, 'clf__gamma': 0.6044433934812886, 'clf__learning_rate': 0.001, 'clf__max_depth': 12, 'clf__min_child_weight': 1, 'clf__n_estimators': 530, 'clf__reg_alpha': 0.2667155198929986, 'clf__reg_lambda': 0.174379685841856, 'clf__subsample': 0.6094555694587478, 'feature_selector__threshold': 'median'})
 
     # Convert to pandas if X is a polars DataFrame
     if hasattr(X, 'to_pandas'):
@@ -294,13 +292,13 @@ def test_xgboost_improved(X, Y):
 
         # Core parameters - narrowed based on previous good values
         "clf__n_estimators": Integer(100, 750),
-        "clf__learning_rate": Real(0.001, 0.1, prior="log-uniform"),
-        "clf__max_depth": Integer(3, 12),  # Narrower range based on best models
+        "clf__learning_rate": Real(0.0001, 1, prior="log-uniform"),
+        "clf__max_depth": Integer(3, 20),  # Narrower range based on best models
 
         # Regular parameters from before
         "clf__gamma": Real(0, 2),
-        "clf__subsample": Real(0.3, 0.9),  # Narrower range based on best models
-        "clf__colsample_bytree": Real(0.3, 0.9),  # Narrower range based on best models
+        "clf__subsample": Real(0.1, 1.0),  # Narrower range based on best models
+        "clf__colsample_bytree": Real(0.1, 0.9),  # Narrower range based on best models
 
         # Additional parameters to tune
         "clf__min_child_weight": Integer(1, 10),  # Controls overfitting
@@ -315,7 +313,7 @@ def test_xgboost_improved(X, Y):
     bayes = BayesSearchCV(
         pipe,
         search_space,
-        n_iter=50,  # Slight increase to explore more combinations
+        n_iter=50,
         cv=cv,
         scoring="accuracy",
         random_state=0,
@@ -364,8 +362,8 @@ def nn_test():
             optimizer=torch.optim.Adam,
             batch_size=32,
             verbose=0,
-            criterion=torch.nn.BCELoss,
-            ordered_classification=True
+            criterion=torch.nn.CrossEntropyLoss,
+            ordered_classification=False
         )),
     ])
 
@@ -677,15 +675,15 @@ def generate_improved_xgb_submission(
 
     # 5) Configure XGBoost with best parameters from improved model
     best_params = {
-        'n_estimators': 186,
-        'learning_rate': 0.04454710528725294,
-        'max_depth': 8,
-        'gamma': 0.2073497817611189,
-        'subsample': 0.6660284019795022,
-        'colsample_bytree': 0.5,
-        'min_child_weight': 3,
-        'reg_alpha': 0.1558019331286106,
-        'reg_lambda': 0.17373696059896945,
+        'n_estimators': 453,
+        'learning_rate': 0.017574122529645332,
+        'max_depth': 10,
+        'gamma': 0.058593119841979784,
+        'subsample': 0.9,
+        'colsample_bytree': 0.3554574842003609,
+        'min_child_weight': 1,
+        'reg_alpha': 0.24536523577509664,
+        'reg_lambda': 0.0,
         'objective': 'multi:softprob',
         'eval_metric': 'mlogloss',
         'verbosity': 0,
@@ -1003,8 +1001,8 @@ def main():
     dh = DataHandler()
     X, Y = dh.get_train_data()
     Y = Y["salary_category"]
-    detect_supervised_outliers(X.to_pandas(), Y.to_pandas())
-
+    # detect_supervised_outliers(X.to_pandas(), Y.to_pandas())
+    test_random_forest(X, Y)
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     main()

@@ -20,11 +20,6 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
-warnings.filterwarnings(
-    "ignore",
-    message="This Pipeline instance is not fitted yet.*",
-)
-
 class CustomTorchClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
@@ -183,7 +178,6 @@ def train_nn_model_ordinal_classification(X, Y):
 def main():
     dh = DataHandler(ordinal_classification=False)
     X, Y = dh.get_train_data()
-    # test(X.to_numpy(), Y.to_numpy())
     train_nn_model_ordinal_classification(X=X, Y=Y)
 
 

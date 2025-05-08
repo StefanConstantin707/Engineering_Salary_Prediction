@@ -8,8 +8,8 @@ from torch.backends.opt_einsum import strategy
 
 class DataHandler:
     def __init__(self, ordinal_classification=False):
-        self.data = pl.read_csv("./data/raw_data/train.csv")
-        self.test_data = pl.read_csv("./data/raw_data/test.csv")
+        self.data = pl.read_csv("../data/raw_data/train.csv")
+        self.test_data = pl.read_csv("../data/raw_data/test.csv")
         self.ordinal_classification = ordinal_classification
 
         self.data_columns = ["job_posted_date"]
@@ -150,26 +150,30 @@ class DataHandler:
         return data
 
     def state_column(self, data):
-        abbr_to_mean = {
-            "NH": 97046, "MA": 94651, "OR": 94286, "PA": 93864, "NY": 93391,
-            "MD": 92244, "WV": 90701, "TX": 89407, "VT": 89074, "NV": 88635,
-            "CA": 87957, "ND": 87795, "VA": 86648, "ME": 86128, "WI": 85718,
-            "DE": 85112, "NM": 84814, "KS": 84508, "OK": 84153, "WA": 83605,
-            "AZ": 83199, "TN": 82354, "ID": 82316, "MS": 80873, "AR": 79907,
-            "KY": 78545, "SC": 78256, "WY": 77540, "UT": 77455, "AL": 76867,
-            "RI": 76628, "GA": 76574, "IL": 76205, "MN": 75504, "MT": 75309,
-            "NJ": 74480, "IN": 73188, "IA": 72526, "CT": 72447, "NC": 71590,
-            "CO": 71342, "MO": 70645, "FL": 70393, "OH": 68590, "HI": 67412,
-            "LA": 67027, "AK": 65498, "NE": 65123, "SD": 62823, "MI": 61400
-        }
-        global_mean = sum(abbr_to_mean.values()) / len(abbr_to_mean)
-        data = data.with_columns(
-            pl.col("job_state")
-            .cast(pl.Utf8)
-            .replace(abbr_to_mean, default=global_mean)  # map codes → mean salary or null
-            .fill_null(global_mean)  # fill unmapped or null with global average
-            .alias("state_avg_salary")
-        ).drop("job_state")
+        # abbr_to_mean = {
+        #     "NH": 97046, "MA": 94651, "OR": 94286, "PA": 93864, "NY": 93391,
+        #     "MD": 92244, "WV": 90701, "TX": 89407, "VT": 89074, "NV": 88635,
+        #     "CA": 87957, "ND": 87795, "VA": 86648, "ME": 86128, "WI": 85718,
+        #     "DE": 85112, "NM": 84814, "KS": 84508, "OK": 84153, "WA": 83605,
+        #     "AZ": 83199, "TN": 82354, "ID": 82316, "MS": 80873, "AR": 79907,
+        #     "KY": 78545, "SC": 78256, "WY": 77540, "UT": 77455, "AL": 76867,
+        #     "RI": 76628, "GA": 76574, "IL": 76205, "MN": 75504, "MT": 75309,
+        #     "NJ": 74480, "IN": 73188, "IA": 72526, "CT": 72447, "NC": 71590,
+        #     "CO": 71342, "MO": 70645, "FL": 70393, "OH": 68590, "HI": 67412,
+        #     "LA": 67027, "AK": 65498, "NE": 65123, "SD": 62823, "MI": 61400
+        # }
+        # global_mean = sum(abbr_to_mean.values()) / len(abbr_to_mean)
+        # data = data.with_columns(
+        #     pl.col("job_state")
+        #     .cast(pl.Utf8)
+        #     .replace(abbr_to_mean, default=global_mean)  # map codes → mean salary or null
+        #     .fill_null(global_mean)  # fill unmapped or null with global average
+        #     .alias("state_avg_salary")
+        # ).drop("job_state")
+
+        data = data.to_dummies(
+            columns=["job_state"]
+        )
 
         return data
 
@@ -197,7 +201,8 @@ class DataHandler:
 
     def normalize_data(self, data: pl.DataFrame, fit: bool) -> pl.DataFrame:
         # select numeric cols: months_since_ref, quantitative, job_desc
-        num_cols = ["months_since_ref"] + self.quantitative_columns + self.job_desc_cols
+        # num_cols = ["months_since_ref", "jd_norm", "state_avg_salary"] + self.quantitative_columns + self.job_desc_cols
+        num_cols = ["months_since_ref", "jd_norm"] + self.quantitative_columns + self.job_desc_cols
         df_pd = data.select(num_cols).to_pandas()
         if fit:
             scaled = self.scaler.fit_transform(df_pd)
@@ -213,8 +218,9 @@ class DataHandler:
         month_encoded_columns = sorted([c for c in self.data.columns if c.startswith("month_")])
         feature_1_encoded_columns = sorted([c for c in self.data.columns if c.startswith("feature_1_")])
         job_title_encoded_columns = sorted([c for c in self.data.columns if c.startswith("job_title_")])
+        job_state_encoded_columns = sorted([c for c in self.data.columns if c.startswith("job_state_")])
 
-        total_feature_columns = (["months_since_ref"] + self.bool_columns + self.quantitative_columns +
+        total_feature_columns = (["months_since_ref", "jd_norm"] + job_state_encoded_columns + self.bool_columns + self.quantitative_columns +
                                  month_encoded_columns + feature_1_encoded_columns + job_title_encoded_columns + self.job_desc_cols)
 
         X = self.data[total_feature_columns]
@@ -229,8 +235,9 @@ class DataHandler:
         month_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("month_")])
         feature_1_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("feature_1_")])
         job_title_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("job_title_")])
+        job_state_encoded_columns = sorted([c for c in self.test_data.columns if c.startswith("job_state_")])
 
-        total_feature_columns = (["months_since_ref"] + self.bool_columns + self.quantitative_columns +
+        total_feature_columns = (["months_since_ref", "jd_norm"] + job_state_encoded_columns + self.bool_columns + self.quantitative_columns +
                                  month_encoded_columns + feature_1_encoded_columns + job_title_encoded_columns + self.job_desc_cols)
 
         X = self.test_data[total_feature_columns]
