@@ -71,7 +71,6 @@ class DataHandler:
         self.test_data = self.normalize_data(self.test_data, fit=False)
 
     def preprocess_data(self, data):
-
         # change state column to state salary column and fill nulls
         data = self.state_column(data)
 
