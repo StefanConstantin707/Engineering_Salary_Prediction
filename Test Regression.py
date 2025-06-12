@@ -1,21 +1,14 @@
-import warnings
-
-import numpy as np
 import pandas as pd
-import polars as pl
-import torch
 import torch.nn.functional as F
-from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
-from skorch import NeuralNetClassifier
 
-from DataHandler import DataHandler
-from NNModel import NNModel
+from Classes.DataHandler import DataHandler
+from Classes.NNModel import NNModel
 
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import KFold
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
@@ -125,7 +118,7 @@ def train_nn_model_ordinal_classification(X, Y):
 
     param_search = {
         "net__lr": Real(1e-5, 1e-3, prior='log-uniform'),
-        "net__max_epochs": Integer(5, 300),
+        "net__max_epochs": Integer(1, 300),
         "net__hidden_size": Categorical([4, 8, 16, 32, 64, 128, 256]),
         "net__num_layers": Integer(1, 5),
         "net__dropout": Categorical([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]),

@@ -1,23 +1,15 @@
 import numpy as np
 import pandas as pd
-import polars as pl
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
-import matplotlib.pyplot as plt
-import seaborn as sns
 import torch
-from sklearn.base import TransformerMixin, BaseEstimator
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.svm import SVC
 from skopt import BayesSearchCV
-from skorch import NeuralNetRegressor, NeuralNetClassifier
+from skorch import NeuralNetClassifier
 from skopt.space import Real, Integer, Categorical
 from torch import optim, nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -25,9 +17,13 @@ import lightgbm as lgb
 from xgboost import XGBClassifier
 import catboost as cb
 
-from DataHandler import DataHandler
-from NNModel import NNModel
+from Classes.DataHandler import DataHandler
+from Classes.NNModel import NNModel
 from SubmissionGenerator import SubmissionGenerator
+
+from sklearn.feature_selection import SelectFromModel
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 
 def print_top_n(bayes_cv, name, n=3):
     # Extract arrays
@@ -251,11 +247,6 @@ def test_xgboost(X, Y):
     )
     bayes.fit(X, Y)
     print_top_n(bayes, "XGBoost")
-
-
-from sklearn.feature_selection import SelectFromModel
-from sklearn.model_selection import StratifiedKFold
-from sklearn.preprocessing import StandardScaler
 
 
 def test_xgboost_improved(X, Y):

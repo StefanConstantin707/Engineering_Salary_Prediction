@@ -9,30 +9,20 @@ class NNModel(nn.Module):
         output_size: int,
         num_layers: int = 2,
         dropout: float = 0.5,
-        ordered_classification : bool = False,
+        # remove ordered_classification flag from here if no internal Sigmoid
     ):
         super().__init__()
-
         layers = []
-
-        # 1) first hidden layer
+        # First hidden layer
         layers.append(nn.Linear(input_size, hidden_size))
         layers.append(nn.ReLU())
         layers.append(nn.Dropout(dropout))
-
-        # 2) additional hidden layers
+        # Additional hidden layers
         for _ in range(num_layers - 1):
             layers.append(nn.Linear(hidden_size, hidden_size))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
-
-        # 3) output layer
         layers.append(nn.Linear(hidden_size, output_size))
-
-        if ordered_classification:
-            layers.append(nn.Sigmoid())
-
-        # pack into Sequential
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):

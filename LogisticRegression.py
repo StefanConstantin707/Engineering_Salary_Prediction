@@ -1,16 +1,14 @@
 import pandas as pd
 import polars as pl
-import numpy as np
 from matplotlib import pyplot as plt
-from sklearn.decomposition import PCA
+from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures
+from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures, TargetEncoder
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
-from sklearn.model_selection import cross_val_score
 from skopt import BayesSearchCV
-from skopt.space import Integer, Real
+from skopt.space import Real
 
-from DataHandler import DataHandler
+from Classes.DataHandler import DataHandler
 
 
 def test():
@@ -135,6 +133,7 @@ def test_LG():
     # total_feature_columns = (["months_since_ref"] + bool_columns + quantitative_columns + feature_1_encoded_columns + job_desc_cols)  # 0.633
     # total_feature_columns = (["months_since_ref"] + bool_columns + quantitative_columns + job_title_encoded_columns + job_desc_cols)  # 0.633
     # total_feature_columns = (["months_since_ref"] + bool_columns + quantitative_columns + job_desc_cols)  # 0.623
+    total_feature_columns = (["feature_10"]) # 0.397
 
     X = X[total_feature_columns]
     Y = Y["salary_category"].to_numpy().ravel().astype(int)
@@ -153,8 +152,7 @@ def test_LG():
     # 2) define search space, including PCA n_components and Logistic C
     n_features = X.shape[1]
     search_space = {
-        # "pca__n_components": Integer(5,  n_features),   # tune how many PCs
-        "clf__C": Real(1e-4, 1e1, prior="log-uniform"),
+        "clf__C": Real(1e-10, 1e-9, prior="log-uniform"),
     }
 
     # 3) wrap in BayesSearchCV
@@ -175,9 +173,63 @@ def test_LG():
     print("Best params:", bayes_cv.best_params_)
     print("Total features before PCA:", n_features)
 
+def test_LG_manual_with_bayes_search():
+    df = pd.read_csv("./data/raw_data/train.csv")
+
+    # Binary encode 'feature_1'
+    df["feature_1"] = (df["feature_1"] == "B").astype(int)
+
+    # Define feature sets
+    job_title_col = ["job_title"]
+    passthrough_cols = ["feature_1"] + \
+        [f"feature_{i}" for i in range(3, 10)] + ["feature_11", "feature_12", "feature_2", "feature_10"]
+    X = df[job_title_col + passthrough_cols]
+
+    # Encode target
+    _mapping = {"Low": 0, "Medium": 1, "High": 2}
+    Y = df["salary_category"].map(_mapping)
+
+    # Preprocessing pipeline
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("te", TargetEncoder(), job_title_col),
+            ("identity", "passthrough", passthrough_cols),
+        ]
+    )
+
+    pipe = Pipeline([
+        ("preprocessor", preprocessor),
+        ("clf", LogisticRegression(max_iter=1000, multi_class="multinomial", solver="lbfgs"))
+    ])
+
+    # Bayesian search space for L2 regularization (inverse of strength)
+    param_space = {
+        "clf__C": Real(1e-4, 10.0, prior="log-uniform")
+    }
+
+    # Bayesian optimizer
+    opt = BayesSearchCV(
+        pipe,
+        param_space,
+        n_iter=25,
+        scoring="accuracy",
+        cv=5,
+        n_jobs=-1,
+        random_state=42,
+    )
+
+    # Fit and print best score
+    opt.fit(X, Y)
+
+    print("Best C:", opt.best_params_["clf__C"])
+    print("Best CV accuracy:", opt.best_score_)
+
+test_LG_manual_with_bayes_search()
+
+
 
 def main():
-    test_LG()
+    test_LG_manual()
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
