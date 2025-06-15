@@ -19,7 +19,7 @@ import catboost as cb
 
 from Classes.DataHandler import DataHandler
 from Classes.NNModel import NNModel
-from SubmissionGenerator import SubmissionGenerator
+from Classes.SubmissionGenerator import SubmissionGenerator
 
 from sklearn.feature_selection import SelectFromModel
 from sklearn.model_selection import StratifiedKFold

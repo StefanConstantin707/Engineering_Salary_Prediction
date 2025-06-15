@@ -1,7 +1,4 @@
 import warnings
-
-from Classes.OutlierDetection import OutlierDetector
-
 from Classes.OrdinalClassifier import OrdinalClassifier
 
 warnings.filterwarnings(
@@ -16,11 +13,13 @@ from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 from skopt import BayesSearchCV
-from skopt.space import Real, Integer
+from skopt.space import Real, Integer, Categorical
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from Classes.DataHandler import DataHandler, FeatureExtractor
+from Classes.OutlierDetection import OutlierDetector
+from Classes.FeatureSelection import FeatureSelector, analyze_feature_importance
 from xgboost import XGBClassifier
 
 
@@ -89,7 +88,7 @@ def analyze_final_clusters(final_pipeline, X, y):
 
 def main():
     # 1) Load raw data with fixed clusters
-    print("Loading data with 9 job description clusters...")
+    print("Loading data with 3 job description clusters...")
     dh = DataHandler(n_job_clusters=3, use_cluster_probabilities=True)
     X_raw, y_df, train_idx = dh.get_train_data_raw()
     X_test_raw, test_idx = dh.get_test_data_raw()
@@ -133,67 +132,117 @@ def main():
     dh_clean = DataHandler(n_job_clusters=3, use_cluster_probabilities=True)
 
     # 3) Set up cross-validation
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+    cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=0)
 
-    # 4) Define search space for XGBoost hyperparameters
+    # 4) Define search space for XGBoost hyperparameters AND feature selection
     search_space = {
-        'clf__estimator__n_estimators': Integer(100, 1000),
-        'clf__estimator__max_depth': Integer(3, 10),
-        'clf__estimator__learning_rate': Real(1e-3, 0.3, prior='log-uniform'),
+        # Feature selection parameters
+        'feature_selection__method': Categorical(['ensemble', 'tree_importance', 'mutual_info']),
+        'feature_selection__n_features': Real(0.6, 1.0),  # Select 30-80% of features
+        # 'feature_selection__n_features': Categorical([1.0]),  # Select 30-80% of features
+
+        # XGBoost parameters
+        'clf__estimator__n_estimators': Categorical([800]),
+        'clf__estimator__max_depth': Categorical([10]),
+        'clf__estimator__learning_rate': Real(0.001, 0.01, prior='log-uniform'),
         'clf__estimator__subsample': Real(0.5, 1.0),
         'clf__estimator__colsample_bytree': Real(0.5, 1.0),
-        'clf__estimator__gamma': Real(0, 5),
+        'clf__estimator__gamma': Real(0, 0.01),
         'clf__estimator__reg_alpha': Real(1e-8, 1.0, prior='log-uniform'),
         'clf__estimator__reg_lambda': Real(1e-8, 1.0, prior='log-uniform')
     }
 
     print("\n" + "=" * 70)
-    print("BAYESIAN OPTIMIZATION FOR XGBOOST ORDINAL CLASSIFIER")
-    print("(Training on cleaned data without outliers)")
+    print("BAYESIAN OPTIMIZATION WITH OUTLIER REMOVAL AND FEATURE SELECTION")
     print("=" * 70)
 
-    xgb_base = XGBClassifier(eval_metric='mlogloss', random_state=0)
+    xgb_base = XGBClassifier(eval_metric='mlogloss', random_state=0, gamma=0.0)
+
+    # Create pipeline with feature selection
     pipe_ordinal = Pipeline([
         ("preproc", dh_clean.pipeline),
+        ("feature_selection", FeatureSelector(
+            method='ensemble',
+            n_features=1.0,
+            random_state=42,
+            verbose=False
+        )),
         ("clf", OrdinalClassifier(
             estimator=xgb_base,
             n_jobs=-1
         ))
     ])
 
-    print("\nOptimizing hyperparameters on cleaned data...")
+    print("\nOptimizing hyperparameters on cleaned data with feature selection...")
     bayes_search = BayesSearchCV(
         pipe_ordinal,
         search_space,
-        n_iter=50,
+        n_iter=100,
         cv=cv,
         scoring="accuracy",
         n_jobs=-1,
         random_state=0,
-        verbose=2
+        verbose=1
     )
 
     # Fit on cleaned data
     bayes_search.fit(X_raw_clean, y_clean)
 
     print(f"\nBest parameters:")
+    print(f"Feature selection:")
+    print(f"  method: {bayes_search.best_params_['feature_selection__method']}")
+    print(f"  n_features: {bayes_search.best_params_['feature_selection__n_features']:.2%}")
+    print(f"\nXGBoost parameters:")
     for param in ['n_estimators', 'max_depth', 'learning_rate', 'subsample', 'colsample_bytree', 'gamma', 'reg_alpha', 'reg_lambda']:
         key = f"clf__estimator__{param}"
         print(f"  {param}: {bayes_search.best_params_[key]}")
-    print(f"Best CV Score: {bayes_search.best_score_:.4f} (+/- {bayes_search.cv_results_['std_test_score'][bayes_search.best_index_]:.4f})")
+    print(f"\nBest CV Score: {bayes_search.best_score_:.4f} (+/- {bayes_search.cv_results_['std_test_score'][bayes_search.best_index_]:.4f})")
 
+    # 5) REFIT WITH BEST PARAMETERS AND VERBOSE FEATURE SELECTION
     print("\n" + "=" * 70)
-    print("FINAL MODEL TRAINING")
+    print("FINAL MODEL TRAINING WITH FEATURE SELECTION")
     print("=" * 70)
-    pipe_final = bayes_search.best_estimator_
 
-    print("Running final cross-validation with the best pipeline on cleaned data...")
+    # Create final pipeline with verbose feature selection
+    best_params = bayes_search.best_params_
+    pipe_final = Pipeline([
+        ("preproc", dh_clean.pipeline),
+        ("feature_selection", FeatureSelector(
+            method=best_params['feature_selection__method'],
+            n_features=best_params['feature_selection__n_features'],
+            random_state=42,
+            verbose=True  # Enable verbose for final training
+        )),
+        ("clf", OrdinalClassifier(
+            estimator=XGBClassifier(
+                n_estimators=best_params['clf__estimator__n_estimators'],
+                max_depth=best_params['clf__estimator__max_depth'],
+                learning_rate=best_params['clf__estimator__learning_rate'],
+                subsample=best_params['clf__estimator__subsample'],
+                colsample_bytree=best_params['clf__estimator__colsample_bytree'],
+                gamma=best_params['clf__estimator__gamma'],
+                reg_alpha=best_params['clf__estimator__reg_alpha'],
+                reg_lambda=best_params['clf__estimator__reg_lambda'],
+                eval_metric='mlogloss',
+                random_state=0
+            ),
+            n_jobs=-1
+        ))
+    ])
+
+    print("\nRunning final cross-validation with the best pipeline on cleaned data...")
     cv_scores_final = cross_val_score(pipe_final, X_raw_clean, y_clean, cv=cv, scoring="accuracy", n_jobs=-1)
     print(f"Cross-validation scores: {cv_scores_final}")
     print(f"Mean CV accuracy: {cv_scores_final.mean():.4f} (+/- {cv_scores_final.std():.4f})")
 
     print("\nTraining final model on cleaned training data...")
     pipe_final.fit(X_raw_clean, y_clean)
+
+    # 6) FEATURE IMPORTANCE ANALYSIS
+    print("\n" + "=" * 70)
+    print("FEATURE IMPORTANCE ANALYSIS")
+    print("=" * 70)
+    importance_df = analyze_feature_importance(pipe_final, X_raw_clean, y_clean, top_n=20)
 
     print("\nGenerating predictions...")
     # Evaluate on original training data (including outliers) to see full performance
@@ -210,10 +259,17 @@ def main():
     print("\n" + "=" * 70)
     print("RESULTS SUMMARY")
     print("=" * 70)
+
+    # Get number of selected features
+    n_features_selected = len(pipe_final.named_steps['feature_selection'].selected_features_)
+    n_features_total = X_preprocessed.shape[1]
+
     results_df = pd.DataFrame({
         "Metric": [
             "Outliers removed",
             "Fixed number of clusters",
+            "Feature selection method",
+            "Features selected",
             "Best XGBoost hyperparameters summary",
             "Cross-validation accuracy (clean data)",
             "Training accuracy (clean data)",
@@ -222,6 +278,8 @@ def main():
         "Value": [
             f"{np.sum(~inlier_mask)} ({np.sum(~inlier_mask) / len(X_raw) * 100:.2f}%)",
             "9",
+            best_params['feature_selection__method'],
+            f"{n_features_selected}/{n_features_total} ({n_features_selected / n_features_total * 100:.1f}%)",
             "See printed params above",
             f"{cv_scores_final.mean():.4f} ± {cv_scores_final.std():.4f}",
             f"{train_accuracy_clean:.4f}",
@@ -272,8 +330,8 @@ def main():
         index=test_idx
     )
     submission_df.index.name = 'id'
-    submission_df.to_csv('submission_with_outlier_removal.csv', index=True)
-    print("\nSubmission file saved to 'submission_with_outlier_removal.csv'")
+    submission_df.to_csv('submission_with_outlier_removal_and_feature_selection.csv', index=True)
+    print("\nSubmission file saved to 'submission_with_outlier_removal_and_feature_selection.csv'")
 
     # Analyze final clusters on clean data
     analyze_final_clusters(pipe_final, X_raw_clean, y_clean)
@@ -281,6 +339,12 @@ def main():
     print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE")
     print("=" * 70)
+
+    # Print top selected features
+    print("\nTop 10 Selected Features:")
+    if importance_df is not None and len(importance_df) > 0:
+        for i, row in importance_df.head(10).iterrows():
+            print(f"  {i + 1}. {row['feature']}: {row['importance']:.4f}")
 
     return pipe_final, outlier_detector
 

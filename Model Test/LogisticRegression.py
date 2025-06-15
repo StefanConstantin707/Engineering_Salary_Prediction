@@ -174,7 +174,7 @@ def test_LG():
     print("Total features before PCA:", n_features)
 
 def test_LG_manual_with_bayes_search():
-    df = pd.read_csv("./data/raw_data/train.csv")
+    df = pd.read_csv("../data/raw_data/train.csv")
 
     # Binary encode 'feature_1'
     df["feature_1"] = (df["feature_1"] == "B").astype(int)

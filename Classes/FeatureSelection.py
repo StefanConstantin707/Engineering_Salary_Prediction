@@ -74,7 +74,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         elif isinstance(self.n_features, float) and 0 < self.n_features < 1:
             n_features_to_select = max(1, int(n_features_total * self.n_features))
         else:
-            n_features_to_select = min(self.n_features, n_features_total)
+            n_features_to_select = min(int(self.n_features), n_features_total)
 
         # Apply the selected method
         if self.method == 'variance':
@@ -163,7 +163,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         # Ensure non-negative values
         X_non_negative = MinMaxScaler().fit_transform(X_array)
 
-        selector = SelectKBest(chi2, k=n_features)
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+        selector = SelectKBest(chi2, k=n_features_int)
         selector.fit(X_non_negative, y)
 
         self.selected_features_ = [f for f, s in zip(self.feature_names_, selector.get_support()) if s]
@@ -173,7 +175,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         """ANOVA F-test."""
         X_array = X.values if hasattr(X, 'values') else X
 
-        selector = SelectKBest(f_classif, k=n_features)
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+        selector = SelectKBest(f_classif, k=n_features_int)
         selector.fit(X_array, y)
 
         self.selected_features_ = [f for f, s in zip(self.feature_names_, selector.get_support()) if s]
@@ -183,9 +187,11 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         """Mutual information."""
         X_array = X.values if hasattr(X, 'values') else X
 
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
         selector = SelectKBest(
             lambda X, y: mutual_info_classif(X, y, random_state=self.random_state),
-            k=n_features
+            k=n_features_int
         )
         selector.fit(X_array, y)
 
@@ -207,7 +213,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
 
         # Get feature importances
         importances = clf.feature_importances_
-        indices = np.argsort(importances)[::-1][:n_features]
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+        indices = np.argsort(importances)[::-1][:n_features_int]
 
         self.selected_features_ = [self.feature_names_[i] for i in indices]
 
@@ -224,7 +232,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
             max_iter=1000
         )
 
-        selector = SelectFromModel(lasso, max_features=n_features)
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+        selector = SelectFromModel(lasso, max_features=n_features_int)
         selector.fit(X_array, y)
 
         self.selected_features_ = [f for f, s in zip(self.feature_names_, selector.get_support()) if s]
@@ -242,7 +252,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
             n_jobs=-1
         )
 
-        selector = RFE(estimator, n_features_to_select=n_features, step=0.1)
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+        selector = RFE(estimator, n_features_to_select=n_features_int, step=0.1)
         selector.fit(X_array, y)
 
         self.selected_features_ = [f for f, s in zip(self.feature_names_, selector.get_support()) if s]
@@ -252,6 +264,9 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         """Ensemble of multiple feature selection methods."""
         X_array = X.values if hasattr(X, 'values') else X
 
+        # Ensure n_features is an integer
+        n_features_int = int(n_features)
+
         # Methods to include in ensemble
         methods = ['anova', 'mutual_info', 'tree_importance']
         feature_votes = {f: 0 for f in self.feature_names_}
@@ -260,7 +275,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         for method in methods:
             selector = FeatureSelector(
                 method=method,
-                n_features=n_features,
+                n_features=n_features_int,
                 random_state=self.random_state,
                 verbose=False
             )
@@ -274,15 +289,15 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         selected = [f for f, votes in feature_votes.items() if votes >= min_votes]
 
         # If we have too few features, add the top voted ones
-        if len(selected) < n_features:
+        if len(selected) < n_features_int:
             remaining = sorted(
                 [(f, v) for f, v in feature_votes.items() if f not in selected],
                 key=lambda x: x[1],
                 reverse=True
             )
-            selected.extend([f for f, v in remaining[:n_features - len(selected)]])
+            selected.extend([f for f, v in remaining[:n_features_int - len(selected)]])
 
-        self.selected_features_ = selected[:n_features]
+        self.selected_features_ = selected[:n_features_int]
 
     def get_feature_names_out(self, input_features=None):
         """Get output feature names."""
@@ -352,7 +367,7 @@ def analyze_feature_importance(pipeline, X, y, top_n=20):
         selected_features = selector.selected_features_
     else:
         print("No feature selection step found in pipeline")
-        return
+        return None
 
     # Transform data through preprocessing
     preproc_steps = []
@@ -389,20 +404,23 @@ def analyze_feature_importance(pipeline, X, y, top_n=20):
     # Get importances
     importances = clf.feature_importances_
 
+    # Ensure we don't have mismatched lengths
+    n_features = min(len(selected_features), len(importances))
+
     # Create importance dataframe
     importance_df = pd.DataFrame({
-        'feature': selected_features[:len(importances)],
-        'importance': importances
+        'feature': selected_features[:n_features],
+        'importance': importances[:n_features]
     }).sort_values('importance', ascending=False)
 
     # Plot top features
     plt.figure(figsize=(10, 8))
-    top_features = importance_df.head(top_n)
+    top_features = importance_df.head(min(top_n, len(importance_df)))
 
     plt.barh(range(len(top_features)), top_features['importance'])
     plt.yticks(range(len(top_features)), top_features['feature'])
     plt.xlabel('Feature Importance')
-    plt.title(f'Top {top_n} Selected Features by Importance')
+    plt.title(f'Top {len(top_features)} Selected Features by Importance')
     plt.gca().invert_yaxis()
     plt.tight_layout()
     plt.show()

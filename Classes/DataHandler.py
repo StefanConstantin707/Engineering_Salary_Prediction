@@ -132,8 +132,8 @@ class DataHandler:
                 ("date", DateFeaturesTransformer(), ["job_posted_date"]),
                 ("bools", "passthrough", bool_cols),
                 ("quants", "passthrough", quant_cols),
-                ("jobdesc_cluster", JobDescriptionClusterTransformer(
-                    n_clusters=self.n_job_clusters,  # This is varied by BayesSearch
+                ("jobdesc_cluster", JobDescriptionClusterTransformerAllData(
+                    n_clusters=self.n_job_clusters,
                     use_probabilities=self.use_cluster_probabilities,
                     random_state=42
                 ), job_desc_cols),
@@ -315,7 +315,7 @@ class CustomJobStateFeature1Transformer(BaseEstimator, TransformerMixin):
 
         # feature_1 → binary
         # Treat missing or non-"B" as 0
-        X_t["feature_1"] = (X_t["feature_1"] == "B").astype(int)
+        X_t["feature_1"] = X_t["feature_1"].isin(["B", "C"]).astype(int)
 
         # job_state → mean mapping
         # Map via dict; unmapped (including NaN) → NaN
@@ -516,7 +516,7 @@ class JobDescriptionClusterTransformer(BaseEstimator, TransformerMixin):
         self.kmeans = KMeans(
             n_clusters=n_clusters,
             random_state=random_state,
-            n_init=10
+            n_init=30
         )
 
     def fit(self, X, y=None):
@@ -568,6 +568,131 @@ class JobDescriptionClusterTransformer(BaseEstimator, TransformerMixin):
 
             # Add minimum distance as additional feature
             result_df['job_cluster_min_dist'] = np.min(distances, axis=1)
+
+        else:
+            # Hard cluster assignment (one-hot encoding)
+            cluster_labels = self.kmeans.predict(X_scaled)
+
+            # Create one-hot encoding
+            result_array = np.zeros((X_array.shape[0], self.n_clusters))
+            result_array[np.arange(len(cluster_labels)), cluster_labels] = 1
+
+            feature_names = [f'job_cluster_{i}' for i in range(self.n_clusters)]
+            result_df = pd.DataFrame(result_array, columns=feature_names, index=index)
+
+        return result_df
+
+    def get_feature_names_out(self, input_features=None):
+        """Return feature names for output features."""
+        if self.use_probabilities:
+            names = [f'job_cluster_prob_{i}' for i in range(self.n_clusters)]
+            names.append('job_cluster_min_dist')
+        else:
+            names = [f'job_cluster_{i}' for i in range(self.n_clusters)]
+        return np.array(names)
+
+
+class JobDescriptionClusterTransformerAllData(BaseEstimator, TransformerMixin):
+    """
+    Transform job description columns into cluster-based features.
+    Replaces 300 job_desc columns with cluster probabilities and distances.
+    """
+
+    def __init__(self, n_clusters=5, use_probabilities=True, random_state=42):
+        """
+        Parameters:
+        -----------
+        n_clusters : int
+            Number of clusters to create
+        use_probabilities : bool
+            If True, return cluster probabilities (soft assignment)
+            If False, return one-hot encoded cluster assignments
+        random_state : int
+            Random state for reproducibility
+        """
+        self.n_clusters = n_clusters
+        self.use_probabilities = use_probabilities
+        self.random_state = random_state
+
+        # Initialize preprocessing and clustering
+        self.scaler = StandardScaler()
+        self.kmeans = KMeans(
+            n_clusters=n_clusters,
+            random_state=random_state,
+            n_init=30
+        )
+
+        DATA_DIR = r"C:\Users\StefanConstantin\Documents\Git\Python\Engineering_Salary_Prediction\data\raw_data"
+
+        job_desc_cols = [f"job_desc_{i:03d}" for i in range(1, 301)]
+
+        train_path = os.path.join(DATA_DIR, "train.csv")
+        test_path = os.path.join(DATA_DIR, "test.csv")
+        train_df = pd.read_csv(train_path)[job_desc_cols]
+        test_df = pd.read_csv(test_path)[job_desc_cols]
+
+        train_array = train_df.values
+        test_array = test_df.values
+
+        train_array = np.where(train_array == 0, np.nan, train_array)
+        test_array = np.where(test_array == 0, np.nan, test_array)
+
+        combined_array = np.concatenate((train_array, test_array), axis=0)
+        combined_array = combined_array[~np.isnan(combined_array[:, 0])]
+
+        scaled_array = self.scaler.fit_transform(combined_array)
+        distances = self.kmeans.fit_transform(scaled_array)
+
+        # Convert distances to probabilities (soft assignment)
+        neg_distances = -distances
+        exp_distances = np.exp(neg_distances - np.max(neg_distances, axis=1, keepdims=True))
+        probabilities = exp_distances / np.sum(exp_distances, axis=1, keepdims=True)
+
+        self.means = np.mean(np.concatenate((probabilities, np.min(distances, axis=1).reshape(-1, 1)), axis=1), axis=0)
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        """Transform job descriptions into cluster features."""
+        X_array = X.values if hasattr(X, 'values') else X
+
+        # Replace zeros with NaN
+        X_array = np.where(X_array == 0, np.nan, X_array)
+
+        nan_mask = np.isnan(X_array[:, 0])
+
+        X_valid = X_array[~nan_mask]
+        X_nan = X_array[nan_mask]
+
+        # Preprocess
+        # X_imputed = self.imputer.transform(X_array)
+        X_scaled = self.scaler.transform(X_valid)
+
+        # Get column names from input if it's a DataFrame
+        if hasattr(X, 'columns'):
+            index = X.index
+        else:
+            index = None
+
+        if self.use_probabilities:
+            # Calculate distances to each cluster center
+            distances = self.kmeans.transform(X_scaled)
+
+            # Convert distances to probabilities (soft assignment)
+            neg_distances = -distances
+            exp_distances = np.exp(neg_distances - np.max(neg_distances, axis=1, keepdims=True))
+            probabilities = exp_distances / np.sum(exp_distances, axis=1, keepdims=True)
+
+            full_probabilities = np.empty((X_array.shape[0], self.means.shape[0]))
+
+            full_probabilities[nan_mask] = np.tile(self.means, (full_probabilities[nan_mask].shape[0], 1))
+            prob_plus_min = np.concatenate((probabilities, np.min(distances, axis=1, keepdims=True)), axis=1)
+            full_probabilities[~nan_mask] = prob_plus_min
+
+            # Create DataFrame with meaningful column names
+            feature_names = [f'job_cluster_prob_{i}' for i in range(self.n_clusters)] + ['job_cluster_min_dist']
+            result_df = pd.DataFrame(full_probabilities, columns=feature_names, index=index)
 
         else:
             # Hard cluster assignment (one-hot encoding)
