@@ -1,0 +1,60 @@
+# XGBoost Configuration for Engineering Salary Prediction
+# Best parameters found through Bayesian optimization
+
+model:
+  name: "XGBoost with Ordinal Classification"
+  type: "xgboost"
+  use_ordinal: true
+
+data_preprocessing:
+  n_job_clusters: 3
+  use_cluster_probabilities: true
+  outlier_detection:
+    method: "ensemble"
+    contamination: 0.05
+  feature_selection:
+    method: "tree_importance"
+    n_features: 0.65
+
+hyperparameters:
+  # Best parameters from optimization
+  n_estimators: 800
+  max_depth: 10
+  learning_rate: 0.005
+  subsample: 0.8
+  colsample_bytree: 0.7
+  gamma: 0.0
+  reg_alpha: 0.1
+  reg_lambda: 0.1
+  random_state: 42
+  eval_metric: "mlogloss"
+
+# Search space for optimization
+search_space:
+  n_estimators: [100, 1000]
+  max_depth: [3, 15]
+  learning_rate: [0.001, 0.1]
+  subsample: [0.5, 1.0]
+  colsample_bytree: [0.5, 1.0]
+  gamma: [0, 0.5]
+  reg_alpha: [0.0001, 10]
+  reg_lambda: [0.0001, 10]
+
+training:
+  cv_folds: 10
+  stratified: true
+  scoring: "accuracy"
+  n_jobs: -1
+  random_state: 42
+  verbose: 2
+
+optimization:
+  method: "bayesian"
+  n_iter: 100
+  n_initial_points: 10
+  acq_func: "gp_hedge"
+
+results:
+  best_cv_score: 0.712
+  training_accuracy: 0.745
+  submission_score: null  # To be filled after competition
